@@ -1494,9 +1494,9 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             const periodStartIdx = dates.findIndex(d => d >= startDate);
 
             // Calculate base values at period start for period return calculations
-            // Period return measures gains from period start to each point
-            const periodBaseIdx = periodStartIdx > 0 ? periodStartIdx - 1 : 0;
-            const periodBaseGain = periodStartIdx > 0 ? agg.total_gain[periodBaseIdx] : 0;
+            // Period return measures gains from period start to each point and should be 0 on the start date
+            const periodBaseIdx = periodStartIdx >= 0 ? periodStartIdx : 0;
+            const periodBaseGain = agg.total_gain[periodBaseIdx] || 0;
 
             // Build custom hover text with all metrics
             const hoverTextPortfolio = [];
@@ -1591,9 +1591,9 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             // Get total invested at end date for return % calculation
             const totalInvestedEnd = agg.total_invested[endIdx];
 
-            // Use day BEFORE period start so gains ON the start date are included
-            const baseRealizedGain = startIdx > 0 ? agg.realized_gain[startIdx - 1] : 0;
-            const baseDividends = startIdx > 0 ? agg.dividends[startIdx - 1] : 0;
+            // Use period start as the baseline so the period return begins at 0
+            const baseRealizedGain = startIdx >= 0 ? agg.realized_gain[startIdx] : 0;
+            const baseDividends = startIdx >= 0 ? agg.dividends[startIdx] : 0;
 
             // Convert values based on selected currency using end date exchange rate
             const metrics = {{
@@ -1611,9 +1611,8 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             // Total return % based on total invested
             metrics.totalReturnPct = totalInvestedEnd > 0 ? (totalReturnEnd / totalInvestedEnd * 100) : 0;
 
-            // Period return: change from period start to end
-            // Use day BEFORE period start so gains ON the start date are included
-            const baseGain = startIdx > 0 ? agg.total_gain[startIdx - 1] : 0;
+            // Period return: change from period start to end using start date as baseline
+            const baseGain = startIdx >= 0 ? agg.total_gain[startIdx] : 0;
             const periodReturnUSD = agg.total_gain[endIdx] - baseGain;
             metrics.periodTotal = convertValue(periodReturnUSD, endIdx);
             // Period return % uses same denominator as total return (total invested)
