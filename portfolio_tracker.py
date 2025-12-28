@@ -1223,6 +1223,20 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
         const minDate = '{min_date}';
         const maxDate = '{max_date}';
 
+        // Plotly treats YYYY-MM-DD strings as UTC dates, which can shift
+        // the rendered day backward for viewers in negative timezones.
+        // We append a midnight time component for plotting and always
+        // convert values from Plotly back to date-only strings when
+        // reading layout events.
+        function toPlotlyDate(dateStr) {{
+            return dateStr + 'T00:00:00';
+        }}
+
+        function toDateOnly(dateTimeStr) {{
+            if (!dateTimeStr) return null;
+            return dateTimeStr.split(/[ T]/)[0];
+        }}
+
         function getSelectedPortfolios() {{
             return portfolioNames.filter(pf => document.getElementById('cb-pf-' + pf).checked);
         }}
@@ -1314,7 +1328,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             const tickMode = document.getElementById('tick-format').value;
             const {{ dtick, tickformat }} = getSmartTickFormat(startDate, endDate, tickMode);
             Plotly.relayout('portfolio-chart', {{
-                'xaxis.range': [startDate, endDate],
+                'xaxis.range': [toPlotlyDate(startDate), toPlotlyDate(endDate)],
                 'xaxis.dtick': dtick,
                 'xaxis.tickformat': tickformat
             }});
@@ -1341,7 +1355,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             const tickMode = document.getElementById('tick-format').value;
             const {{ dtick, tickformat }} = getSmartTickFormat(startDate, endDate, tickMode);
             Plotly.relayout('portfolio-chart', {{
-                'xaxis.range': [startDate, endDate],
+                'xaxis.range': [toPlotlyDate(startDate), toPlotlyDate(endDate)],
                 'xaxis.dtick': dtick,
                 'xaxis.tickformat': tickformat
             }});
@@ -1469,7 +1483,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             }}
 
             const agg = aggregateData(selectedPf, selectedTk);
-            const parsedDates = dates.map(d => d);
+            const parsedDates = dates.map(d => toPlotlyDate(d));
 
             // Convert values based on selected currency
             const convertedPortfolioValue = agg.portfolio_value.map((v, i) => convertValue(v, i));
@@ -1509,7 +1523,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
                 const decimals = currency === 'KRW' ? 0 : 2;
 
                 // Format date for display
-                const dateObj = new Date(dates[i]);
+                const dateObj = new Date(parsedDates[i]);
                 const dateStr = dateObj.toLocaleDateString(locale, {{ year: 'numeric', month: 'short', day: 'numeric' }});
 
                 hoverTextPortfolio.push(
@@ -1682,7 +1696,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             updateChart();
 
             Plotly.relayout('portfolio-chart', {{
-                'xaxis.range': [startDate, endDate],
+                'xaxis.range': [toPlotlyDate(startDate), toPlotlyDate(endDate)],
                 'xaxis.dtick': dtick,
                 'xaxis.tickformat': tickformat
             }});
@@ -1701,7 +1715,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
 
             const {{ dtick, tickformat }} = getSmartTickFormat(minDate, maxDate, 'auto');
             Plotly.relayout('portfolio-chart', {{
-                'xaxis.range': [minDate, maxDate],
+                'xaxis.range': [toPlotlyDate(minDate), toPlotlyDate(maxDate)],
                 'xaxis.dtick': dtick,
                 'xaxis.tickformat': tickformat
             }});
@@ -1710,11 +1724,11 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
         document.getElementById('portfolio-chart').on('plotly_relayout', function(eventData) {{
             let startDate, endDate;
             if (eventData['xaxis.range[0]'] && eventData['xaxis.range[1]']) {{
-                startDate = eventData['xaxis.range[0]'].split(' ')[0];
-                endDate = eventData['xaxis.range[1]'].split(' ')[0];
+                startDate = toDateOnly(eventData['xaxis.range[0]']);
+                endDate = toDateOnly(eventData['xaxis.range[1]']);
             }} else if (eventData['xaxis.range']) {{
-                startDate = eventData['xaxis.range'][0].split(' ')[0];
-                endDate = eventData['xaxis.range'][1].split(' ')[0];
+                startDate = toDateOnly(eventData['xaxis.range'][0]);
+                endDate = toDateOnly(eventData['xaxis.range'][1]);
             }} else if (eventData['xaxis.autorange']) {{
                 startDate = minDate;
                 endDate = maxDate;
@@ -1743,7 +1757,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             const endDate = document.getElementById('end-date').value;
             const {{ dtick, tickformat }} = getSmartTickFormat(startDate, endDate, 'auto');
             Plotly.relayout('portfolio-chart', {{
-                'xaxis.range': [startDate, endDate],
+                'xaxis.range': [toPlotlyDate(startDate), toPlotlyDate(endDate)],
                 'xaxis.dtick': dtick,
                 'xaxis.tickformat': tickformat
             }});
