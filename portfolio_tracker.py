@@ -242,6 +242,68 @@ def convert_to_base_currency(value: float, currency: str, exchange_rates: dict, 
         return value  # Return as-is if conversion fails
 
 
+def convert_from_base_currency(value: float, target_currency: str, exchange_rates: dict, date) -> float:
+    """Convert a value from base currency (USD) to target currency (e.g., CAD).
+    
+    Args:
+        value: Amount in base currency (USD)
+        target_currency: Target currency code (e.g., 'CAD', 'KRW', 'EUR')
+        exchange_rates: Dictionary of exchange rate time series
+        date: Date for the exchange rate lookup
+        
+    Returns:
+        Value converted to target currency
+    """
+    if target_currency == BASE_CURRENCY:
+        return value
+
+    # Fallback rates: 1 USD = X target_currency
+    fallback_rates = {'KRW': 1300, 'JPY': 150, 'EUR': 0.92, 'GBP': 0.79, 'HKD': 7.8, 'CAD': 1.36, 'AUD': 1.53}
+    
+    if target_currency not in exchange_rates or exchange_rates[target_currency] is None:
+        rate = fallback_rates.get(target_currency, 1.0)
+        return value * rate
+
+    rates_series = exchange_rates[target_currency]
+
+    # Normalize the date to be timezone-naive for comparison
+    if hasattr(date, 'tz') and date.tz is not None:
+        date = date.tz_localize(None)
+    date = pd.Timestamp(date)
+    if date.tz is not None:
+        date = date.tz_localize(None)
+
+    # Find the closest date in the exchange rate data
+    try:
+        if date in rates_series.index:
+            rate = rates_series.loc[date]
+        else:
+            # Use the nearest previous date
+            mask = rates_series.index <= date
+            if mask.any():
+                rate = rates_series.loc[rates_series.index[mask][-1]]
+            else:
+                rate = rates_series.iloc[0]
+
+        return value * rate  # Multiply to convert from base currency to target currency
+    except:
+        return value  # Return as-is if conversion fails
+
+
+def convert_to_cad(value: float, exchange_rates: dict, date) -> float:
+    """Convenience function to convert USD to CAD.
+    
+    Args:
+        value: Amount in USD
+        exchange_rates: Dictionary of exchange rate time series
+        date: Date for the exchange rate lookup
+        
+    Returns:
+        Value converted to CAD
+    """
+    return convert_from_base_currency(value, 'CAD', exchange_rates, date)
+
+
 def load_transactions(csv_path: str) -> pd.DataFrame:
     """Load and parse transactions from CSV file."""
     df = pd.read_csv(csv_path, parse_dates=['date'])
@@ -520,9 +582,12 @@ def calculate_portfolio_history(transactions: pd.DataFrame) -> tuple:
 
     # Fetch exchange rates if needed
     exchange_rates = {}
-    if required_currencies:
-        print("Fetching exchange rates...")
-        exchange_rates = get_exchange_rates(required_currencies, start_date, end_date)
+    # Always include CAD and KRW for display currency options, plus any currencies from stocks
+    display_currencies = {'CAD', 'KRW'}
+    currencies_to_fetch = required_currencies.union(display_currencies)
+    if currencies_to_fetch:
+        print(f"Fetching exchange rates for: {', '.join(sorted(currencies_to_fetch))}")
+        exchange_rates = get_exchange_rates(currencies_to_fetch, start_date, end_date)
         # Forward fill exchange rates
         for curr in exchange_rates:
             if exchange_rates[curr] is not None:
@@ -705,6 +770,18 @@ def calculate_portfolio_history(transactions: pd.DataFrame) -> tuple:
                 key = str(d)[:10]  # Take first 10 chars if already string
             exchange_rate_data['KRW'][key] = r
 
+    if 'CAD' in exchange_rates and exchange_rates['CAD'] is not None:
+        # Create a dict of date -> rate
+        cad_rates = exchange_rates['CAD']
+        exchange_rate_data['CAD'] = {}
+        for d, r in cad_rates.items():
+            # Handle both datetime and string keys
+            if hasattr(d, 'strftime'):
+                key = d.strftime('%Y-%m-%d')
+            else:
+                key = str(d)[:10]  # Take first 10 chars if already string
+            exchange_rate_data['CAD'][key] = r
+
     return history_by_portfolio, history_by_portfolio_stock, portfolios, tickers, exchange_rate_data
 
 
@@ -742,6 +819,20 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
     else:
         # Default exchange rate if not available
         exchange_rates_js['KRW'] = [1300.0] * len(dates)
+
+    if 'CAD' in exchange_rate_data:
+        exchange_rates_js['CAD'] = []
+        for d in dates:
+            if d in exchange_rate_data['CAD']:
+                val = exchange_rate_data['CAD'][d]
+                # Convert to native Python float
+                exchange_rates_js['CAD'].append(float(val) if hasattr(val, 'item') else float(val))
+            else:
+                # Use closest previous rate or default
+                exchange_rates_js['CAD'].append(1.36)
+    else:
+        # Default exchange rate if not available
+        exchange_rates_js['CAD'] = [1.36] * len(dates)
 
     # Helper function to convert Series/array to list of native Python floats
     def to_float_list(series):
@@ -1067,6 +1158,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
                 <label>Currency</label>
                 <select id="currency-select" onchange="updateChart()">
                     <option value="USD">USD ($)</option>
+                    <option value="CAD">CAD (C$)</option>
                     <option value="KRW">KRW (₩)</option>
                 </select>
             </div>
@@ -1276,18 +1368,27 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             return document.getElementById('currency-select').value;
         }}
 
-        function getExchangeRate(index) {{
-            // Returns the exchange rate at a given date index (USD to KRW)
-            if (exchangeRates.KRW && exchangeRates.KRW[index]) {{
+        function getExchangeRate(index, currency) {{
+            // Returns the exchange rate at a given date index (USD to target currency)
+            if (currency === 'KRW' && exchangeRates.KRW && exchangeRates.KRW[index]) {{
                 return exchangeRates.KRW[index];
             }}
-            return 1300.0; // Default fallback
+            if (currency === 'CAD' && exchangeRates.CAD && exchangeRates.CAD[index]) {{
+                return exchangeRates.CAD[index];
+            }}
+            // Default fallbacks
+            if (currency === 'KRW') return 1300.0;
+            if (currency === 'CAD') return 1.36;
+            return 1.0;
         }}
 
         function convertValue(valueUSD, index) {{
             const currency = getSelectedCurrency();
             if (currency === 'KRW') {{
-                return valueUSD * getExchangeRate(index);
+                return valueUSD * getExchangeRate(index, 'KRW');
+            }}
+            if (currency === 'CAD') {{
+                return valueUSD * getExchangeRate(index, 'CAD');
             }}
             return valueUSD;
         }}
@@ -1332,6 +1433,11 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
                 if (absVal >= 100000000) return sign + '₩' + (absVal / 100000000).toFixed(1) + '억';
                 if (absVal >= 10000) return sign + '₩' + (absVal / 10000).toFixed(1) + '만';
                 return sign + '₩' + Math.round(absVal).toLocaleString('ko-KR');
+            }} else if (currency === 'CAD') {{
+                // Canadian Dollar formatting
+                if (absVal >= 1000000) return sign + 'C$' + (absVal / 1000000).toFixed(1) + 'M';
+                if (absVal >= 1000) return sign + 'C$' + (absVal / 1000).toFixed(1) + 'K';
+                return sign + 'C$' + absVal.toFixed(0);
             }} else {{
                 // USD formatting
                 if (absVal >= 1000000) return sign + '$' + (absVal / 1000000).toFixed(1) + 'M';
@@ -1341,7 +1447,10 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
         }}
 
         function getCurrencySymbol() {{
-            return getSelectedCurrency() === 'KRW' ? '₩' : '$';
+            const currency = getSelectedCurrency();
+            if (currency === 'KRW') return '₩';
+            if (currency === 'CAD') return 'C$';
+            return '$';
         }}
 
         function updateChart() {{
@@ -1396,7 +1505,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
                 const periodReturnPct = totalInvested > 0 ? (periodReturnUSD / totalInvested * 100) : 0;
                 const periodPctSign = periodReturnPct >= 0 ? '+' : '';
 
-                const locale = currency === 'KRW' ? 'ko-KR' : 'en-US';
+                const locale = currency === 'KRW' ? 'ko-KR' : (currency === 'CAD' ? 'en-CA' : 'en-US');
                 const decimals = currency === 'KRW' ? 0 : 2;
 
                 // Format date for display
