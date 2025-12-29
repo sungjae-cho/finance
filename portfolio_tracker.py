@@ -244,13 +244,13 @@ def convert_to_base_currency(value: float, currency: str, exchange_rates: dict, 
 
 def convert_from_base_currency(value: float, target_currency: str, exchange_rates: dict, date) -> float:
     """Convert a value from base currency (USD) to target currency (e.g., CAD).
-    
+
     Args:
         value: Amount in base currency (USD)
         target_currency: Target currency code (e.g., 'CAD', 'KRW', 'EUR')
         exchange_rates: Dictionary of exchange rate time series
         date: Date for the exchange rate lookup
-        
+
     Returns:
         Value converted to target currency
     """
@@ -259,7 +259,7 @@ def convert_from_base_currency(value: float, target_currency: str, exchange_rate
 
     # Fallback rates: 1 USD = X target_currency
     fallback_rates = {'KRW': 1300, 'JPY': 150, 'EUR': 0.92, 'GBP': 0.79, 'HKD': 7.8, 'CAD': 1.36, 'AUD': 1.53}
-    
+
     if target_currency not in exchange_rates or exchange_rates[target_currency] is None:
         rate = fallback_rates.get(target_currency, 1.0)
         return value * rate
@@ -292,12 +292,12 @@ def convert_from_base_currency(value: float, target_currency: str, exchange_rate
 
 def convert_to_cad(value: float, exchange_rates: dict, date) -> float:
     """Convenience function to convert USD to CAD.
-    
+
     Args:
         value: Amount in USD
         exchange_rates: Dictionary of exchange rate time series
         date: Date for the exchange rate lookup
-        
+
     Returns:
         Value converted to CAD
     """
@@ -1223,6 +1223,20 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
         const minDate = '{min_date}';
         const maxDate = '{max_date}';
 
+        // Plotly treats YYYY-MM-DD strings as UTC dates, which can shift
+        // the rendered day backward for viewers in negative timezones.
+        // We append a midnight time component for plotting and always
+        // convert values from Plotly back to date-only strings when
+        // reading layout events.
+        function toPlotlyDate(dateStr) {{
+            return dateStr + 'T00:00:00';
+        }}
+
+        function toDateOnly(dateTimeStr) {{
+            if (!dateTimeStr) return null;
+            return dateTimeStr.split(/[ T]/)[0];
+        }}
+
         function getSelectedPortfolios() {{
             return portfolioNames.filter(pf => document.getElementById('cb-pf-' + pf).checked);
         }}
@@ -1314,7 +1328,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             const tickMode = document.getElementById('tick-format').value;
             const {{ dtick, tickformat }} = getSmartTickFormat(startDate, endDate, tickMode);
             Plotly.relayout('portfolio-chart', {{
-                'xaxis.range': [startDate, endDate],
+                'xaxis.range': [toPlotlyDate(startDate), toPlotlyDate(endDate)],
                 'xaxis.dtick': dtick,
                 'xaxis.tickformat': tickformat
             }});
@@ -1341,7 +1355,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             const tickMode = document.getElementById('tick-format').value;
             const {{ dtick, tickformat }} = getSmartTickFormat(startDate, endDate, tickMode);
             Plotly.relayout('portfolio-chart', {{
-                'xaxis.range': [startDate, endDate],
+                'xaxis.range': [toPlotlyDate(startDate), toPlotlyDate(endDate)],
                 'xaxis.dtick': dtick,
                 'xaxis.tickformat': tickformat
             }});
@@ -1469,7 +1483,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             }}
 
             const agg = aggregateData(selectedPf, selectedTk);
-            const parsedDates = dates.map(d => d);
+            const parsedDates = dates.map(d => toPlotlyDate(d));
 
             // Convert values based on selected currency
             const convertedPortfolioValue = agg.portfolio_value.map((v, i) => convertValue(v, i));
@@ -1479,10 +1493,12 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             const startDate = document.getElementById('start-date').value;
             const periodStartIdx = dates.findIndex(d => d >= startDate);
 
-            // Calculate base values at period start for period return calculations
-            // Period return measures gains from period start to each point
-            const periodBaseIdx = periodStartIdx > 0 ? periodStartIdx - 1 : 0;
-            const periodBaseGain = periodStartIdx > 0 ? agg.total_gain[periodBaseIdx] : 0;
+            // Calculate base values from day BEFORE period start for period return calculations
+            // Period return measures gains from the day before period start to each point
+            // This means period return on the first day reflects the gain ON that day
+            // (from purchase price to closing price, or from previous day's value)
+            const periodBaseIdx = periodStartIdx > 0 ? periodStartIdx - 1 : -1;
+            const periodBaseGain = periodBaseIdx >= 0 ? agg.total_gain[periodBaseIdx] : 0;
 
             // Build custom hover text with all metrics
             const hoverTextPortfolio = [];
@@ -1509,7 +1525,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
                 const decimals = currency === 'KRW' ? 0 : 2;
 
                 // Format date for display
-                const dateObj = new Date(dates[i]);
+                const dateObj = new Date(parsedDates[i]);
                 const dateStr = dateObj.toLocaleDateString(locale, {{ year: 'numeric', month: 'short', day: 'numeric' }});
 
                 hoverTextPortfolio.push(
@@ -1577,9 +1593,12 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             // Get total invested at end date for return % calculation
             const totalInvestedEnd = agg.total_invested[endIdx];
 
-            // Use day BEFORE period start so gains ON the start date are included
-            const baseRealizedGain = startIdx > 0 ? agg.realized_gain[startIdx - 1] : 0;
-            const baseDividends = startIdx > 0 ? agg.dividends[startIdx - 1] : 0;
+            // Use the day BEFORE period start as the baseline
+            // This ensures period return includes gains that occur ON the start date
+            // If startIdx is 0 (first day of data), baseline is 0
+            const baseIdx = startIdx > 0 ? startIdx - 1 : -1;
+            const baseRealizedGain = baseIdx >= 0 ? agg.realized_gain[baseIdx] : 0;
+            const baseDividends = baseIdx >= 0 ? agg.dividends[baseIdx] : 0;
 
             // Convert values based on selected currency using end date exchange rate
             const metrics = {{
@@ -1597,9 +1616,11 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             // Total return % based on total invested
             metrics.totalReturnPct = totalInvestedEnd > 0 ? (totalReturnEnd / totalInvestedEnd * 100) : 0;
 
-            // Period return: change from period start to end
-            // Use day BEFORE period start so gains ON the start date are included
-            const baseGain = startIdx > 0 ? agg.total_gain[startIdx - 1] : 0;
+            // Period return: gains from day before period start to end date
+            // Using baseIdx (day before start) ensures period return includes the start date's gains
+            // When period starts at first investment date, baseIdx = -1, so baseGain = 0
+            // This makes period return = total return (as expected)
+            const baseGain = baseIdx >= 0 ? agg.total_gain[baseIdx] : 0;
             const periodReturnUSD = agg.total_gain[endIdx] - baseGain;
             metrics.periodTotal = convertValue(periodReturnUSD, endIdx);
             // Period return % uses same denominator as total return (total invested)
@@ -1682,7 +1703,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             updateChart();
 
             Plotly.relayout('portfolio-chart', {{
-                'xaxis.range': [startDate, endDate],
+                'xaxis.range': [toPlotlyDate(startDate), toPlotlyDate(endDate)],
                 'xaxis.dtick': dtick,
                 'xaxis.tickformat': tickformat
             }});
@@ -1701,7 +1722,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
 
             const {{ dtick, tickformat }} = getSmartTickFormat(minDate, maxDate, 'auto');
             Plotly.relayout('portfolio-chart', {{
-                'xaxis.range': [minDate, maxDate],
+                'xaxis.range': [toPlotlyDate(minDate), toPlotlyDate(maxDate)],
                 'xaxis.dtick': dtick,
                 'xaxis.tickformat': tickformat
             }});
@@ -1710,11 +1731,11 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
         document.getElementById('portfolio-chart').on('plotly_relayout', function(eventData) {{
             let startDate, endDate;
             if (eventData['xaxis.range[0]'] && eventData['xaxis.range[1]']) {{
-                startDate = eventData['xaxis.range[0]'].split(' ')[0];
-                endDate = eventData['xaxis.range[1]'].split(' ')[0];
+                startDate = toDateOnly(eventData['xaxis.range[0]']);
+                endDate = toDateOnly(eventData['xaxis.range[1]']);
             }} else if (eventData['xaxis.range']) {{
-                startDate = eventData['xaxis.range'][0].split(' ')[0];
-                endDate = eventData['xaxis.range'][1].split(' ')[0];
+                startDate = toDateOnly(eventData['xaxis.range'][0]);
+                endDate = toDateOnly(eventData['xaxis.range'][1]);
             }} else if (eventData['xaxis.autorange']) {{
                 startDate = minDate;
                 endDate = maxDate;
@@ -1743,7 +1764,7 @@ def create_interactive_chart(history_by_portfolio: dict, history_by_portfolio_st
             const endDate = document.getElementById('end-date').value;
             const {{ dtick, tickformat }} = getSmartTickFormat(startDate, endDate, 'auto');
             Plotly.relayout('portfolio-chart', {{
-                'xaxis.range': [startDate, endDate],
+                'xaxis.range': [toPlotlyDate(startDate), toPlotlyDate(endDate)],
                 'xaxis.dtick': dtick,
                 'xaxis.tickformat': tickformat
             }});
