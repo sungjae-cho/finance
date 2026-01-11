@@ -1918,25 +1918,65 @@ def generate_html(transactions_data: list, ticker_info: dict, exchange_rates: di
                 }}
 
                 // Calculate percentage returns for unrealized and realized
-                // Unrealized % = (unrealized return / cost basis of current holdings) * 100
-                const unrealizedPct = costBasisHistorical > 0 ? (unrealizedReturn / costBasisHistorical) * 100 : 0;
+                // For all-time: based on cost basis
+                // For period: based on period start value / purchases
                 
-                // Realized % = (realized return / cost basis of sold shares) * 100
-                const realizedPct = soldCostBasisConverted > 0 ? (realizedReturn / soldCostBasisConverted) * 100 : 0;
+                // All-time percentages
+                const allTimeUnrealizedPct = costBasisHistorical > 0 ? (unrealizedReturn / costBasisHistorical) * 100 : 0;
+                const allTimeRealizedPct = soldCostBasisConverted > 0 ? (realizedReturn / soldCostBasisConverted) * 100 : 0;
                 
-                // Calculate local and FX breakdown percentages (based on same cost basis as total)
-                // Unrealized breakdown
-                const unrealizedLocalPct = costBasisHistorical > 0 ? (localUnrealized / costBasisHistorical) * 100 : 0;
-                const unrealizedFxPct = costBasisHistorical > 0 ? ((unrealizedReturn - localUnrealized) / costBasisHistorical) * 100 : 0;
+                // Period percentages
+                // Unrealized base: start value still held + purchases
+                let periodUnrealizedBase;
+                if (currency === nativeCurrency) {{
+                    periodUnrealizedBase = startValueStillHeldNative + purchasesNative;
+                }} else {{
+                    const nativeToUsdStart = nativeCurrency === 'USD' ? 1 : 1 / startFxRate;
+                    const usdToDisplayStart = currency === 'USD' ? 1 : startToDisplay;
+                    const usdToDisplayEnd = currency === 'USD' ? 1 : endToDisplay;
+                    const startValueStillHeldDisplay = startValueStillHeldNative * nativeToUsdStart * usdToDisplayStart;
+                    const purchasesDisplay = purchasesUsd * usdToDisplayEnd;
+                    periodUnrealizedBase = startValueStillHeldDisplay + purchasesDisplay;
+                }}
                 
-                // Realized breakdown
-                const realizedLocalPct = soldCostBasisConverted > 0 ? (localRealized / soldCostBasisConverted) * 100 : 0;
-                const realizedFxPct = soldCostBasisConverted > 0 ? ((realizedReturn - localRealized) / soldCostBasisConverted) * 100 : 0;
+                // Realized base: cost basis of shares sold during period
+                let periodRealizedBase;
+                if (currency === nativeCurrency) {{
+                    periodRealizedBase = soldCostBasisNative;
+                }} else {{
+                    const usdToDisplayEnd = currency === 'USD' ? 1 : endToDisplay;
+                    periodRealizedBase = soldCostBasisUsd * usdToDisplayEnd;
+                }}
                 
-                // Calculate annualized return for unrealized gains
-                // Period rules:
-                // Start: Use S_p (period start) if S_s < S_p; otherwise S_s (first purchase date)
-                // End: Use E_p (period end) if E_p < E_s or E_s doesn't exist; otherwise E_s (last sale date when fully sold)
+                const periodUnrealizedPct = periodUnrealizedBase > 0 ? (periodUnrealizedActual / periodUnrealizedBase) * 100 : 0;
+                const periodRealizedPct = periodRealizedBase > 0 ? (periodRealizedActual / periodRealizedBase) * 100 : 0;
+                
+                // Select which percentage to use based on view mode
+                const unrealizedPct = isAllTime ? allTimeUnrealizedPct : periodUnrealizedPct;
+                const realizedPct = isAllTime ? allTimeRealizedPct : periodRealizedPct;
+                
+                // Calculate local and FX breakdown percentages
+                // All-time breakdown (based on cost basis)
+                const allTimeUnrealizedLocalPct = costBasisHistorical > 0 ? (localUnrealized / costBasisHistorical) * 100 : 0;
+                const allTimeUnrealizedFxPct = costBasisHistorical > 0 ? ((unrealizedReturn - localUnrealized) / costBasisHistorical) * 100 : 0;
+                const allTimeRealizedLocalPct = soldCostBasisConverted > 0 ? (localRealized / soldCostBasisConverted) * 100 : 0;
+                const allTimeRealizedFxPct = soldCostBasisConverted > 0 ? ((realizedReturn - localRealized) / soldCostBasisConverted) * 100 : 0;
+                
+                // Period breakdown (based on period base values)
+                const periodUnrealizedLocalPct = periodUnrealizedBase > 0 ? (periodUnrealizedLocal / periodUnrealizedBase) * 100 : 0;
+                const periodUnrealizedFxPct = periodUnrealizedBase > 0 ? (periodUnrealizedFx / periodUnrealizedBase) * 100 : 0;
+                const periodRealizedLocalPct = periodRealizedBase > 0 ? (periodRealizedLocal / periodRealizedBase) * 100 : 0;
+                const periodRealizedFxPct = periodRealizedBase > 0 ? (periodRealizedFx / periodRealizedBase) * 100 : 0;
+                
+                // Select which percentages to use based on view mode
+                const unrealizedLocalPct = isAllTime ? allTimeUnrealizedLocalPct : periodUnrealizedLocalPct;
+                const unrealizedFxPct = isAllTime ? allTimeUnrealizedFxPct : periodUnrealizedFxPct;
+                const realizedLocalPct = isAllTime ? allTimeRealizedLocalPct : periodRealizedLocalPct;
+                const realizedFxPct = isAllTime ? allTimeRealizedFxPct : periodRealizedFxPct;
+                
+                // Calculate annualized return
+                // For all-time: based on cost basis vs current value
+                // For period: based on period start value vs period end value
                 const tickerTxns = transactionsData
                     .filter(t => t.ticker === ticker && selectedPortfolios.has(t.portfolio))
                     .sort((a, b) => a.date.localeCompare(b.date));
@@ -1945,65 +1985,67 @@ def generate_html(transactions_data: list, ticker_info: dict, exchange_rates: di
                 const sellTxns = tickerTxns.filter(t => t.action.toLowerCase() === 'sell');
                 
                 let annualizedReturn = 0;
-                if (buyTxns.length > 0 && (costBasisHistorical > 0 || soldCostBasisConverted > 0)) {{
-                    // S_s: First purchase date
-                    const firstPurchaseDate = new Date(buyTxns[0].date);
-                    // S_p: Period start date
-                    const periodStartDate = new Date(startDate);
-                    
-                    // Start: Use S_p if S_s < S_p; otherwise S_s
-                    const effectiveStart = firstPurchaseDate < periodStartDate ? periodStartDate : firstPurchaseDate;
-                    
-                    // E_p: Period end date
-                    const periodEndDate = new Date(endDate);
-                    
-                    // E_s: Last sale date when fully sold (only if shares = 0)
-                    let effectiveEnd = periodEndDate;
-                    if (endShares < 0.0001 && sellTxns.length > 0) {{
-                        // Stock is fully sold, find E_s (last sale date)
-                        const lastSaleDate = new Date(sellTxns[sellTxns.length - 1].date);
-                        // End: Use E_p if E_p < E_s; otherwise E_s
-                        effectiveEnd = periodEndDate < lastSaleDate ? periodEndDate : lastSaleDate;
-                    }}
-                    
-                    const holdingDays = Math.max(1, Math.round((effectiveEnd - effectiveStart) / (1000 * 60 * 60 * 24)));
-                    
-                    // Calculate value at effective end date
-                    let endValueForAnnualized, costBasisForAnnualized;
-                    
-                    if (endShares < 0.0001) {{
-                        // Fully sold: use realized return
-                        endValueForAnnualized = salesConverted;
-                        costBasisForAnnualized = soldCostBasisConverted;
-                    }} else {{
-                        // Still holding: use unrealized return at effective end date
-                        const effectiveEndStr = effectiveEnd.toISOString().split('T')[0];
-                        const priceAtEnd = getClosestPrice(ticker, effectiveEndStr, 'backward') || endPriceNative;
-                        const valueNativeAtEnd = endShares * priceAtEnd;
+                
+                if (isAllTime) {{
+                    // All-time annualized return: from first purchase to now/sale date
+                    if (buyTxns.length > 0 && (costBasisHistorical > 0 || soldCostBasisConverted > 0)) {{
+                        const firstPurchaseDate = new Date(buyTxns[0].date);
+                        const periodEndDate = new Date(endDate);
                         
-                        // Convert to display currency at effective end date FX rate
-                        const fxRateAtEnd = getHistoricalFxRate(nativeCurrency, effectiveEndStr, 'backward');
-                        const displayRateAtEnd = currency === 'USD' ? 1 : getHistoricalFxRate(currency, effectiveEndStr, 'backward');
-                        
-                        if (currency === nativeCurrency) {{
-                            endValueForAnnualized = valueNativeAtEnd;
-                        }} else if (currency === 'USD') {{
-                            endValueForAnnualized = nativeCurrency === 'USD' ? valueNativeAtEnd : valueNativeAtEnd / fxRateAtEnd;
-                        }} else {{
-                            const valueUsd = nativeCurrency === 'USD' ? valueNativeAtEnd : valueNativeAtEnd / fxRateAtEnd;
-                            endValueForAnnualized = valueUsd * displayRateAtEnd;
+                        let effectiveEnd = periodEndDate;
+                        if (endShares < 0.0001 && sellTxns.length > 0) {{
+                            const lastSaleDate = new Date(sellTxns[sellTxns.length - 1].date);
+                            effectiveEnd = periodEndDate < lastSaleDate ? periodEndDate : lastSaleDate;
                         }}
-                        costBasisForAnnualized = costBasisHistorical;
+                        
+                        const holdingDays = Math.max(1, Math.round((effectiveEnd - firstPurchaseDate) / (1000 * 60 * 60 * 24)));
+                        
+                        let endValueForAnnualized, costBasisForAnnualized;
+                        
+                        if (endShares < 0.0001) {{
+                            endValueForAnnualized = salesConverted;
+                            costBasisForAnnualized = soldCostBasisConverted;
+                        }} else {{
+                            const effectiveEndStr = effectiveEnd.toISOString().split('T')[0];
+                            const priceAtEnd = getClosestPrice(ticker, effectiveEndStr, 'backward') || endPriceNative;
+                            const valueNativeAtEnd = endShares * priceAtEnd;
+                            
+                            const fxRateAtEnd = getHistoricalFxRate(nativeCurrency, effectiveEndStr, 'backward');
+                            const displayRateAtEnd = currency === 'USD' ? 1 : getHistoricalFxRate(currency, effectiveEndStr, 'backward');
+                            
+                            if (currency === nativeCurrency) {{
+                                endValueForAnnualized = valueNativeAtEnd;
+                            }} else if (currency === 'USD') {{
+                                endValueForAnnualized = nativeCurrency === 'USD' ? valueNativeAtEnd : valueNativeAtEnd / fxRateAtEnd;
+                            }} else {{
+                                const valueUsd = nativeCurrency === 'USD' ? valueNativeAtEnd : valueNativeAtEnd / fxRateAtEnd;
+                                endValueForAnnualized = valueUsd * displayRateAtEnd;
+                            }}
+                            costBasisForAnnualized = costBasisHistorical;
+                        }}
+                        
+                        const returnPctForAnnualized = costBasisForAnnualized > 0 ? 
+                            ((endValueForAnnualized - costBasisForAnnualized) / costBasisForAnnualized) * 100 : 0;
+                        
+                        const returnMultiplier = 1 + returnPctForAnnualized / 100;
+                        if (returnMultiplier > 0) {{
+                            annualizedReturn = 100 * (Math.pow(returnMultiplier, 365 / holdingDays) - 1);
+                        }}
                     }}
+                }} else {{
+                    // Period annualized return: from period start to period end
+                    // Based on period return percentage
+                    const periodStartDate = new Date(startDate);
+                    const periodEndDate = new Date(endDate);
+                    const periodDays = Math.max(1, Math.round((periodEndDate - periodStartDate) / (1000 * 60 * 60 * 24)));
                     
-                    // Calculate return percentage
-                    const returnPctForAnnualized = costBasisForAnnualized > 0 ? 
-                        ((endValueForAnnualized - costBasisForAnnualized) / costBasisForAnnualized) * 100 : 0;
+                    // Use the period return percentage (unrealized + realized as % of base)
+                    const periodTotalReturn = periodUnrealizedActual + periodRealizedActual;
+                    const periodReturnPct = periodBaseDisplay > 0 ? (periodTotalReturn / periodBaseDisplay) * 100 : 0;
                     
-                    // Annualized return formula: ((1 + r)^(365/days) - 1) * 100
-                    const returnMultiplier = 1 + returnPctForAnnualized / 100;
-                    if (returnMultiplier > 0) {{
-                        annualizedReturn = 100 * (Math.pow(returnMultiplier, 365 / holdingDays) - 1);
+                    const returnMultiplier = 1 + periodReturnPct / 100;
+                    if (returnMultiplier > 0 && periodDays > 0) {{
+                        annualizedReturn = 100 * (Math.pow(returnMultiplier, 365 / periodDays) - 1);
                     }}
                 }}
 
