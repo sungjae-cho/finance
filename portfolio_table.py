@@ -613,6 +613,165 @@ def generate_html(transactions_data: list, ticker_info: dict, exchange_rates: di
             border-radius: 8px;
             border-left: 3px solid #00d2ff;
         }}
+
+        /* Transaction Detail Modal */
+        .modal-overlay {{
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }}
+
+        .modal-overlay.active {{
+            display: flex;
+        }}
+
+        .modal-content {{
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            max-width: 1000px;
+            width: 90%;
+            max-height: 80vh;
+            overflow: hidden;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+        }}
+
+        .modal-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 25px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(58, 123, 213, 0.2);
+        }}
+
+        .modal-header h2 {{
+            font-size: 1.4rem;
+            color: #e0e0e0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+
+        .modal-header .ticker-badge {{
+            background: rgba(58, 123, 213, 0.5);
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 1rem;
+            color: #7eb3ff;
+        }}
+
+        .modal-close {{
+            background: none;
+            border: none;
+            color: #a0a0a0;
+            font-size: 1.8rem;
+            cursor: pointer;
+            padding: 5px 10px;
+            line-height: 1;
+            transition: color 0.2s;
+        }}
+
+        .modal-close:hover {{
+            color: #ff5252;
+        }}
+
+        .modal-body {{
+            padding: 20px 25px;
+            overflow-y: auto;
+            max-height: calc(80vh - 80px);
+        }}
+
+        .modal-summary {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }}
+
+        .modal-summary-item {{
+            text-align: center;
+        }}
+
+        .modal-summary-item .label {{
+            font-size: 0.75rem;
+            color: #808080;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }}
+
+        .modal-summary-item .value {{
+            font-size: 1.1rem;
+            font-weight: 600;
+        }}
+
+        .transaction-table {{
+            width: 100%;
+            border-collapse: collapse;
+        }}
+
+        .transaction-table th {{
+            background: rgba(58, 123, 213, 0.3);
+            padding: 12px 10px;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #c0c0c0;
+            text-align: left;
+            white-space: nowrap;
+        }}
+
+        .transaction-table th.number {{
+            text-align: right;
+        }}
+
+        .transaction-table td {{
+            padding: 12px 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 0.9rem;
+        }}
+
+        .transaction-table tbody tr:hover {{
+            background: rgba(255, 255, 255, 0.05);
+        }}
+
+        .transaction-table .action-buy {{
+            color: #00c853;
+        }}
+
+        .transaction-table .action-sell {{
+            color: #ff9800;
+        }}
+
+        .ticker.clickable, .stock-name.clickable {{
+            cursor: pointer;
+            transition: color 0.2s;
+        }}
+
+        .ticker.clickable:hover {{
+            color: #00d2ff;
+            text-decoration: underline;
+        }}
+
+        .stock-name.clickable:hover {{
+            color: #a0a0a0;
+        }}
+
+        .no-transactions {{
+            text-align: center;
+            padding: 40px;
+            color: #808080;
+        }}
     </style>
 </head>
 <body>
@@ -701,6 +860,38 @@ def generate_html(transactions_data: list, ticker_info: dict, exchange_rates: di
 
         <div class="timestamp">
             Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        </div>
+
+        <!-- Transaction Detail Modal -->
+        <div class="modal-overlay" id="transactionModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>
+                        <span id="modalStockName"></span>
+                        <span class="ticker-badge" id="modalTicker"></span>
+                    </h2>
+                    <button class="modal-close" onclick="closeModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-summary" id="modalSummary"></div>
+                    <table class="transaction-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Portfolio</th>
+                                <th>Action</th>
+                                <th class="number">Shares</th>
+                                <th class="number">Adj. Shares</th>
+                                <th class="number">Buy Price</th>
+                                <th class="number">Buy Value</th>
+                                <th class="number">Current Value</th>
+                                <th class="number">Gain</th>
+                            </tr>
+                        </thead>
+                        <tbody id="transactionTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -2084,8 +2275,8 @@ def generate_html(transactions_data: list, ticker_info: dict, exchange_rates: di
                 tbody.innerHTML = combined.map(h => `
                     <tr>
                         <td>
-                            <div class="ticker">${{h.ticker}}${{h.shares < 0.0001 ? ' <span style="color: #ff9800; font-size: 0.8em;">(Sold)</span>' : ''}}</div>
-                            <div class="stock-name">${{h.name}}</div>
+                            <div class="ticker clickable" onclick="showTransactionDetails('${{h.ticker}}')">${{h.ticker}}${{h.shares < 0.0001 ? ' <span style="color: #ff9800; font-size: 0.8em;">(Sold)</span>' : ''}}</div>
+                            <div class="stock-name clickable" onclick="showTransactionDetails('${{h.ticker}}')">${{h.name}}</div>
                         </td>
                         <td>
                             <div class="portfolio-tags">
@@ -2140,8 +2331,8 @@ def generate_html(transactions_data: list, ticker_info: dict, exchange_rates: di
                 tbody.innerHTML = combined.map(h => `
                     <tr>
                         <td>
-                            <div class="ticker">${{h.ticker}}${{h.shares < 0.0001 ? ' <span style="color: #ff9800; font-size: 0.8em;">(Sold)</span>' : ''}}</div>
-                            <div class="stock-name">${{h.name}}</div>
+                            <div class="ticker clickable" onclick="showTransactionDetails('${{h.ticker}}')">${{h.ticker}}${{h.shares < 0.0001 ? ' <span style="color: #ff9800; font-size: 0.8em;">(Sold)</span>' : ''}}</div>
+                            <div class="stock-name clickable" onclick="showTransactionDetails('${{h.ticker}}')">${{h.name}}</div>
                         </td>
                         <td>
                             <div class="portfolio-tags">
@@ -2166,6 +2357,216 @@ def generate_html(transactions_data: list, ticker_info: dict, exchange_rates: di
             
             updateSortIndicators();
         }}
+
+        // Show transaction details modal for a specific ticker
+        function showTransactionDetails(ticker) {{
+            const modal = document.getElementById('transactionModal');
+            const tbody = document.getElementById('transactionTableBody');
+            const summaryDiv = document.getElementById('modalSummary');
+            const currency = document.getElementById('currencySelect').value;
+            const endDate = document.getElementById('endDate').value;
+            
+            const info = tickerInfo[ticker] || {{ name: ticker, currency: 'USD' }};
+            const nativeCurrency = info.currency;
+            
+            document.getElementById('modalTicker').textContent = ticker;
+            document.getElementById('modalStockName').textContent = info.name;
+            
+            // Get current price
+            const currentPrice = getClosestPrice(ticker, endDate);
+            const currentFxRate = getHistoricalFxRate(nativeCurrency, endDate, 'backward');
+            
+            // Filter transactions for this ticker and selected portfolios
+            const tickerTxns = transactionsData
+                .filter(t => t.ticker === ticker && selectedPortfolios.has(t.portfolio))
+                .sort((a, b) => a.date.localeCompare(b.date));
+            
+            if (tickerTxns.length === 0) {{
+                tbody.innerHTML = '<tr><td colspan="9" class="no-transactions">No transactions found for selected portfolios</td></tr>';
+                summaryDiv.innerHTML = '';
+                modal.classList.add('active');
+                return;
+            }}
+            
+            // Calculate transaction details with gains
+            // Track remaining shares per lot for FIFO-like tracking
+            let lots = [];  // Array of {{ date, shares, price, adjustedShares }}
+            let totalBuyValue = 0;
+            let totalCurrentValue = 0;
+            let totalShares = 0;
+            let totalRealizedGain = 0;
+            let tableRows = [];
+            
+            for (const txn of tickerTxns) {{
+                const splitRatio = getFutureSplitRatio(ticker, txn.date);
+                const adjustedShares = txn.shares * splitRatio;
+                const txnFxRate = getHistoricalFxRate(nativeCurrency, txn.date, 'backward');
+                
+                if (txn.action.toLowerCase() === 'buy') {{
+                    const buyValue = txn.shares * txn.price;  // In native currency
+                    const buyValueDisplay = convertToDisplayCurrency(buyValue, nativeCurrency, currency, txn.date);
+                    
+                    // Current value of these shares
+                    const currentValueNative = adjustedShares * currentPrice;
+                    const currentValueDisplay = convertToDisplayCurrency(currentValueNative, nativeCurrency, currency, endDate);
+                    
+                    const gain = currentValueDisplay - buyValueDisplay;
+                    const gainPct = buyValueDisplay > 0 ? (gain / buyValueDisplay) * 100 : 0;
+                    
+                    lots.push({{
+                        date: txn.date,
+                        originalShares: txn.shares,
+                        shares: adjustedShares,
+                        price: txn.price,
+                        buyValue: buyValue,
+                        buyValueDisplay: buyValueDisplay
+                    }});
+                    
+                    totalBuyValue += buyValueDisplay;
+                    totalCurrentValue += currentValueDisplay;
+                    totalShares += adjustedShares;
+                    
+                    tableRows.push(`
+                        <tr>
+                            <td>${{txn.date}}</td>
+                            <td><span class="portfolio-tag">${{txn.portfolio}}</span></td>
+                            <td class="action-buy">BUY</td>
+                            <td class="number">${{txn.shares.toLocaleString('en-US', {{maximumFractionDigits: 4}})}}</td>
+                            <td class="number">${{adjustedShares.toLocaleString('en-US', {{maximumFractionDigits: 4}})}}${{splitRatio !== 1 ? ` <span style="color: #ff9800; font-size: 0.75em;">(×${{splitRatio}})</span>` : ''}}</td>
+                            <td class="number">${{formatNumber(txn.price, nativeCurrency)}}</td>
+                            <td class="number">${{formatNumber(buyValueDisplay, currency)}}</td>
+                            <td class="number">${{formatNumber(currentValueDisplay, currency)}}</td>
+                            <td class="number ${{gain >= 0 ? 'positive' : 'negative'}}">
+                                ${{formatSignedNumber(gain, currency)}} (${{formatPercent(gainPct)}})
+                            </td>
+                        </tr>
+                    `);
+                }} else if (txn.action.toLowerCase() === 'sell') {{
+                    // Process sell - reduce from lots FIFO style
+                    let remainingToSell = txn.shares * splitRatio;
+                    let soldCostBasis = 0;
+                    const sellPrice = txn.price;
+                    const sellValue = txn.shares * sellPrice;
+                    const sellValueDisplay = convertToDisplayCurrency(sellValue, nativeCurrency, currency, txn.date);
+                    
+                    // Calculate cost basis of sold shares
+                    for (const lot of lots) {{
+                        if (remainingToSell <= 0) break;
+                        if (lot.shares > 0) {{
+                            const sellFromLot = Math.min(lot.shares, remainingToSell);
+                            const costRatio = sellFromLot / lot.shares;
+                            const lotCostSold = lot.buyValueDisplay * costRatio;
+                            soldCostBasis += lotCostSold;
+                            lot.shares -= sellFromLot;
+                            lot.buyValueDisplay -= lotCostSold;
+                            remainingToSell -= sellFromLot;
+                            totalShares -= sellFromLot;
+                            totalBuyValue -= lotCostSold;
+                        }}
+                    }}
+                    
+                    const realizedGain = sellValueDisplay - soldCostBasis;
+                    const realizedPct = soldCostBasis > 0 ? (realizedGain / soldCostBasis) * 100 : 0;
+                    totalRealizedGain += realizedGain;
+                    
+                    tableRows.push(`
+                        <tr>
+                            <td>${{txn.date}}</td>
+                            <td><span class="portfolio-tag">${{txn.portfolio}}</span></td>
+                            <td class="action-sell">SELL</td>
+                            <td class="number">${{txn.shares.toLocaleString('en-US', {{maximumFractionDigits: 4}})}}</td>
+                            <td class="number">${{(txn.shares * splitRatio).toLocaleString('en-US', {{maximumFractionDigits: 4}})}}${{splitRatio !== 1 ? ` <span style="color: #ff9800; font-size: 0.75em;">(×${{splitRatio}})</span>` : ''}}</td>
+                            <td class="number">${{formatNumber(txn.price, nativeCurrency)}}</td>
+                            <td class="number" style="color: #808080;">${{formatNumber(soldCostBasis, currency)}} (cost)</td>
+                            <td class="number">${{formatNumber(sellValueDisplay, currency)}}</td>
+                            <td class="number ${{realizedGain >= 0 ? 'positive' : 'negative'}}">
+                                ${{formatSignedNumber(realizedGain, currency)}} (${{formatPercent(realizedPct)}})
+                            </td>
+                        </tr>
+                    `);
+                }}
+            }}
+            
+            // Recalculate current value for remaining shares
+            totalCurrentValue = 0;
+            for (const lot of lots) {{
+                if (lot.shares > 0) {{
+                    const currentValueNative = lot.shares * currentPrice;
+                    totalCurrentValue += convertToDisplayCurrency(currentValueNative, nativeCurrency, currency, endDate);
+                }}
+            }}
+            
+            const unrealizedGain = totalCurrentValue - totalBuyValue;
+            const unrealizedPct = totalBuyValue > 0 ? (unrealizedGain / totalBuyValue) * 100 : 0;
+            const totalGain = unrealizedGain + totalRealizedGain;
+            
+            // Build summary
+            summaryDiv.innerHTML = `
+                <div class="modal-summary-item">
+                    <div class="label">Current Price</div>
+                    <div class="value">${{formatNumber(currentPrice, nativeCurrency)}}</div>
+                </div>
+                <div class="modal-summary-item">
+                    <div class="label">Shares Held</div>
+                    <div class="value">${{totalShares.toLocaleString('en-US', {{maximumFractionDigits: 4}})}}</div>
+                </div>
+                <div class="modal-summary-item">
+                    <div class="label">Cost Basis</div>
+                    <div class="value">${{formatNumber(totalBuyValue, currency)}}</div>
+                </div>
+                <div class="modal-summary-item">
+                    <div class="label">Current Value</div>
+                    <div class="value">${{formatNumber(totalCurrentValue, currency)}}</div>
+                </div>
+                <div class="modal-summary-item">
+                    <div class="label">Unrealized Gain</div>
+                    <div class="value ${{unrealizedGain >= 0 ? 'positive' : 'negative'}}">
+                        ${{formatSignedNumber(unrealizedGain, currency)}}
+                        <div style="font-size: 0.8rem; color: #808080;">${{formatPercent(unrealizedPct)}}</div>
+                    </div>
+                </div>
+                <div class="modal-summary-item">
+                    <div class="label">Realized Gain</div>
+                    <div class="value ${{totalRealizedGain >= 0 ? 'positive' : 'negative'}}">
+                        ${{formatSignedNumber(totalRealizedGain, currency)}}
+                    </div>
+                </div>
+            `;
+            
+            tbody.innerHTML = tableRows.join('');
+            modal.classList.add('active');
+        }}
+
+        // Helper function to convert to display currency using historical rate
+        function convertToDisplayCurrency(amount, fromCurrency, toCurrency, date) {{
+            if (fromCurrency === toCurrency) return amount;
+            
+            const fromRate = getHistoricalFxRate(fromCurrency, date, 'backward');
+            const toRate = getHistoricalFxRate(toCurrency, date, 'backward');
+            
+            // Convert to USD first, then to target
+            const usdAmount = fromCurrency === 'USD' ? amount : amount / fromRate;
+            return toCurrency === 'USD' ? usdAmount : usdAmount * toRate;
+        }}
+
+        // Close modal
+        function closeModal() {{
+            document.getElementById('transactionModal').classList.remove('active');
+        }}
+
+        // Close modal when clicking outside
+        document.getElementById('transactionModal').addEventListener('click', function(e) {{
+            if (e.target === this) {{
+                closeModal();
+            }}
+        }});
+
+        // Close modal with Escape key
+        document.addEventListener('keydown', function(e) {{
+            if (e.key === 'Escape') {{
+                closeModal();
+            }}
+        }});
 
         // Initialize
         initFilters();
