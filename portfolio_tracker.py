@@ -639,7 +639,10 @@ def calculate_portfolio_history(transactions: pd.DataFrame) -> tuple:
         for split_date in splits[ticker].index:
             split_date_ts = pd.Timestamp(split_date)
             if split_date_ts.date() > from_date.date():
-                ratio *= float(splits[ticker][split_date])
+                # Only apply splits with ratio >= 1 (stock splits, not cancellations/reverse splits)
+                split_ratio = float(splits[ticker][split_date])
+                if split_ratio >= 1.0:
+                    ratio *= split_ratio
         return ratio
 
     # Build history per portfolio AND per stock
